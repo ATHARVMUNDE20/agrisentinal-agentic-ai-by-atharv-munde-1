@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A managed farm that hosts multiple fields
+model Farm {
+  id        String   @id @default(cuid())
+  name      String
+  location  String
+  region    String?
+  createdAt DateTime @default(now())
+  fields    Field[]
+}
+
+// An individual cultivated plot inside a farm
+model Field {
+  id            String   @id @default(cuid())
+  farmId        String?
+  name          String
+  crop          String
+  variety       String?
+  areaHectares  Float    @default(1)
+  location      String?
+  soilType      String   @default("loam")
+  irrigation    String   @default("drip")
+  plantedAt     DateTime?
+  status        String   @default("HEALTHY") // HEALTHY | WATCH | STRESS | CRITICAL
+  baseYieldTonsPerHa Float @default(4.5)
+  createdAt     DateTime @default(now())
+  farm          Farm?   @relation(fields: [farmId], references: [id], onDelete: SetNull)
+  readings      SensorReading[]
+  alerts        Alert[]
+  diagnoses     Diagnosis[]
+
+  @@index([farmId])
+  @@index([status])
+}
+
+// Time-series telemetry ingested from simulated IoT probes
+model SensorReading {
+  id             String   @id @default(cuid())
+  fieldId        String
+  recordedAt     DateTime @default(now())
+  soilMoisture   Float // %
+  temperature    Float // degrees C
+  humidity       Float // %
+  soilPh         Float
+  ndvi           Float // vegetation index 0..1
+  lightIntensity Float // klux
+  rainfallMm     Float    @default(0)
+  nitrogen       Float    @default(50) // ppm
+  phosphorus     Float    @default(30) // ppm
+  potassium      Float    @default(40) // ppm
+
+  field Field @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@index([fieldId, recordedAt])
+}
+
+// Alerts raised by the Sentinel agent (or deterministic rules)
+model Alert {
+  id             String   @id @default(cuid())
+  fieldId        String?
+  severity       String   @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  type           String   // DROUGHT_RISK | PEST_RISK | NUTRIENT | DISEASE_RISK | WEATHER | IRRIGATION | SENSOR
+  title          String
+  message        String
+  recommendation String?
+  agentReasoning String?
+  status         String   @default("OPEN") // OPEN | ACKNOWLEDGED | RESOLVED
+  source         String   @default("AGENT") // AGENT | RULES
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  field Field? @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([fieldId])
+}
+
+// Vision-model crop disease diagnoses
+model Diagnosis {
+  id             String   @id @default(cuid())
+  fieldId        String?
+  crop           String?
+  isCropImage    Boolean  @default(true)
+  healthStatus   String   @default("UNKNOWN") // HEALTHY | DISEASED | PEST | NUTRIENT_DEFICIENT | UNKNOWN
+  conditionName  String?
+  confidence     Float?
+  severity       String?  // NONE | MILD | MODERATE | SEVERE
+  description    String?
+  treatment      String? // JSON array of steps
+  prevention     String? // JSON array of steps
+  agentReasoning String?
+  imageMeta      String? // name/size/mime of uploaded image
+  createdAt      DateTime @default(now())
+
+  field Field? @relation(fields: [fieldId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+// One execution of the autonomous Sentinel scan loop
+model AgentRun {
+  id           String   @id @default(cuid())
+  trigger      String   @default("MANUAL") // MANUAL | AUTO
+  status       String   @default("COMPLETED") // RUNNING | COMPLETED | FAILED
+  durationMs   Int      @default(0)
+  fieldsScanned Int     @default(0)
+  alertsCreated Int     @default(0)
+  summary      String?
+  steps        String? // JSON array of {tool, detail, ms}
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// AgriBot conversation history
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String // user | assistant
+  content   String
+  toolTrace String? // JSON array of tool names used
+  createdAt DateTime @default(now())
+
+  @@index([sessionId, createdAt])
+}
